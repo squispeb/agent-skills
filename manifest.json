@@ -1,0 +1,8 @@
+{
+  "format": "agent-skills",
+  "owner": "squispeb",
+  "skills": {
+    "agent-orchestration": { "origin": "authored", "publish": true },
+    "worktree-spawn": { "origin": "authored", "publish": true }
+  }
+}
