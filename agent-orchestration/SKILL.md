@@ -102,14 +102,19 @@ opencode run "Review this implementation plan for correctness, edge cases, and m
   -m openai/gpt-5.6-terra
 ```
 
-## In-Session Delegation (opencode only)
+## Subagent Archetypes
 
-Inside an opencode session, configured agents cover the common floors without shelling out:
+Do not depend on harness-configured agents (opencode `@execution`/`@ui`, Claude Code subagent types) -- they require per-project or per-user config that may not exist where you are running. Instead, define the subagent's role inside the prompt itself and spawn it with `opencode run`, which behaves identically from every harness.
 
-- `@execution`: `opencode-go/kimi-k2.7-code`; fast, cheap, code-focused (floor 4).
-- `@ui`: frontend and visual work; uses the session default model.
+Each archetype is a model choice plus what the prompt must contain for the output to be verifiable:
 
-When the task requires a model not in the configured agent definition, or you are orchestrating from a different harness, use `opencode run` directly with `-m`.
+| archetype | model | prompt must include |
+|-----------|-------|---------------------|
+| executor (floor 4) | `opencode-go/kimi-k2.7-code` | the locked spec verbatim, exact file paths, output format |
+| implementer (floor 8) | `openai/gpt-5.6-luna` | acceptance criteria, test expectations, patch format |
+| ui / copy (taste >= 7) | `anthropic/claude-sonnet-5` | design constraints, existing tokens/components to match, accessibility requirements |
+| reviewer (floor 9) | `openai/gpt-5.6-terra` | the artifact to review inline, the review dimensions, findings-list format |
+| architect (floor 10) | `openai/gpt-5.6-sol` | full problem context and constraints, required output: decision plus rationale plus rejected alternatives |
 
 ## Parallel Work
 
