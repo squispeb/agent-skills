@@ -1,14 +1,34 @@
 ---
 name: agent-orchestration
 description: >-
-  Orchestrates opencode subagents by selecting models, writing self-contained
-  `opencode run` prompts, and running independent work in parallel. Use when
-  delegating a subtask, choosing an agent model, or coordinating parallel agents.
+  Orchestrates subagents from any harness by assessing task difficulty,
+  selecting the model whose intelligence and taste clear the task's floor,
+  spawning via `opencode run`, and verifying output before accepting it.
+  Use when delegating a subtask, choosing an agent model, deciding how hard
+  a task is, or coordinating parallel agents.
 ---
 
 # Agent Orchestration
 
-Use this skill to delegate work to `opencode run` agents. Choose the model based on the task's required intelligence and taste, not cost alone. Use parallel agents only for independent tasks with no shared-state conflicts.
+Spawn subagents with `opencode run`. It is a plain CLI command, so any harness with a shell tool (Claude Code, Codex, Cursor, Gemini CLI, opencode itself) can orchestrate the same way. The workflow is always: assess the task's required intelligence and taste, pick the cheapest model that clears both floors, write a self-contained prompt, then verify the output before accepting it.
+
+Do not delegate a task smaller than the prompt needed to describe it — do it inline instead.
+
+## Assessing the Required Intelligence
+
+Classify the task by observable traits before touching the model table. The floor is the minimum intelligence rating the chosen model must have.
+
+| task traits | intelligence floor |
+|-------------|--------------------|
+| Locked spec, mechanically verifiable output: renames, migrations, boilerplate from a template, format conversions | 4 |
+| Standard implementation with existing patterns to copy and clear acceptance criteria | 8 |
+| Ambiguous scope, cross-file reasoning, or judgment calls you cannot pre-specify in the prompt | 9 |
+| Expensive-to-reverse decisions: architecture, data models, public APIs, security audits | 10 |
+
+Two supplementary rules:
+
+- **Taste floor:** anything user-facing (UI, copy, API design) additionally needs taste >= 7, regardless of the intelligence floor.
+- **Mixed tasks:** take the highest floor among the traits present. When axes conflict for work that ships, resolve in this order: intelligence, then taste, then cost.
 
 ## Model Rankings
 
@@ -27,13 +47,23 @@ Rankings 1-10: higher = better. Cost reflects actual paid cost, not list price. 
 
 ## Selection Rules
 
-- Bulk/mechanical work with a locked specification, data analysis, or migrations: `opencode-go/kimi-k2.7-code`. Escalate to `openai/gpt-5.6-luna` if output misses the bar.
-- Coding implementation, boilerplate, and data transforms: `openai/gpt-5.6-luna`.
-- User-facing UI, copy, or API design: use `anthropic/claude-sonnet-5` or higher because taste must be at least 7.
-- Review, second opinions, complex reasoning, and planning: `openai/gpt-5.6-terra` or `anthropic/claude-fable-5`.
-- Hardest autonomous tasks and architecture decisions: `openai/gpt-5.6-sol`.
-- For shipping work, resolve conflicts in this order: intelligence, then taste, then cost.
-- Treat these as defaults. Escalate without asking when a cheaper model will not meet the required quality bar.
+Pick the cheapest model whose intelligence AND taste both clear the task's floors. The common cases resolve to:
+
+- Floor 4 (bulk/mechanical, locked spec): `opencode-go/kimi-k2.7-code`.
+- Floor 8 (standard implementation, boilerplate, data transforms): `openai/gpt-5.6-luna`.
+- Taste >= 7 (user-facing UI, copy, API design): any model with taste 7 or above -- `anthropic/claude-sonnet-5` is the cheapest that qualifies; use a higher-intelligence model from that set if the task is also hard.
+- Floor 9 (review, second opinions, planning, ambiguous scope): `openai/gpt-5.6-terra` or `anthropic/claude-fable-5`.
+- Floor 10 (architecture, expensive-to-reverse decisions): `openai/gpt-5.6-sol`.
+
+Treat these as defaults. Escalate without asking when a cheaper model will not meet the required quality bar -- escalating costs less than shipping mediocre work.
+
+## Verifying and Escalating
+
+Never accept subagent output unread. Check it against the acceptance criteria you put in the prompt. When it misses the bar, diagnose which failure it is before retrying, because the fixes are different:
+
+1. **Spec failure** -- the output is competent but solves the wrong problem or misses a constraint. The prompt was ambiguous. Re-run the SAME model with a corrected, tighter prompt; escalating the model will not fix a bad spec.
+2. **Capability failure** -- the spec was clear but the output is wrong, shallow, or incomplete. Escalate one intelligence tier (kimi -> luna -> terra -> sol) and re-run with the same prompt.
+3. **Repeated capability failure** -- two escalations without acceptable output means the task is not delegable as specified. Do it yourself or decompose it into smaller tasks with lower floors.
 
 ## `opencode run`
 
@@ -45,47 +75,52 @@ Write every delegated prompt so the agent can act without prior conversation con
 
 - Include exact file paths, task boundaries, acceptance criteria, and relevant constraints.
 - Specify the desired output format: file content, patch/diff, JSON, findings list, or another exact form.
+- State the acceptance criteria explicitly -- you will verify against them when the agent returns.
 - Do not reference "the previous conversation", "the task above", or other unavailable context.
 
 Examples:
 
 ```bash
-# Mechanical edit
+# Floor 4: mechanical edit, locked spec
 opencode run "Implement the supplied spec in src/foo.ts. Preserve the public API. Return only the final file content." \
   -m opencode-go/kimi-k2.7-code
 
-# Taste-sensitive UI work
+# Taste >= 7: user-facing UI work
 opencode run "Redesign src/components/BookingForm.tsx. Match existing Tailwind tokens and preserve mobile accessibility. Return a patch." \
   -m anthropic/claude-sonnet-5
 
-# Efficient implementation
+# Floor 8: standard implementation
 opencode run "Implement the supplied validation rules in src/foo.ts and add focused tests in src/foo.test.ts. Return a patch." \
   -m openai/gpt-5.6-luna
 
-# High-intelligence audit
+# Floor 10: security-sensitive audit
 opencode run "Audit src/auth/ for security vulnerabilities. Inspect all relevant files and return a severity-ranked findings list with file and line references." \
   -m openai/gpt-5.6-sol
 
-# Review
+# Floor 9: review / second opinion
 opencode run "Review this implementation plan for correctness, edge cases, and missing tests: <plan>. Return a concise findings list." \
   -m openai/gpt-5.6-terra
 ```
 
-## In-Session Delegation
+## In-Session Delegation (opencode only)
 
-Use configured agents for simple in-session delegation:
+Inside an opencode session, configured agents cover the common floors without shelling out:
 
-- `@execution`: `opencode-go/kimi-k2.7-code`; fast, cheap, code-focused.
+- `@execution`: `opencode-go/kimi-k2.7-code`; fast, cheap, code-focused (floor 4).
 - `@ui`: frontend and visual work; uses the session default model.
 
-When the task requires a model that is not in the configured agent definition, use `opencode run` directly with `-m`.
+When the task requires a model not in the configured agent definition, or you are orchestrating from a different harness, use `opencode run` directly with `-m`.
 
 ## Parallel Work
 
-Only run tasks in parallel when they are independent and do not edit overlapping files or depend on each other's output.
+Only run tasks in parallel when they are independent: no overlapping file edits and no dependency on each other's output. Redirect each agent's output to its own file, otherwise the interleaved stdout makes results unattributable.
 
 ```bash
-opencode run "task A ..." -m anthropic/claude-sonnet-5 &
-opencode run "task B ..." -m opencode-go/kimi-k2.7-code &
+opencode run "task A ..." -m anthropic/claude-sonnet-5      > /tmp/agent-task-a.log 2>&1 &
+opencode run "task B ..." -m opencode-go/kimi-k2.7-code     > /tmp/agent-task-b.log 2>&1 &
 wait
+
+# Verify each result separately before accepting it
+cat /tmp/agent-task-a.log
+cat /tmp/agent-task-b.log
 ```
