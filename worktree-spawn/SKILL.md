@@ -84,82 +84,17 @@ echo "Ready: cd $WORKTREE && bun dev -> $PORTLESS_URL"
 
 ---
 
-## Picking the Right Model
+## Spawn Inside the Worktree
 
-Rankings 1-10: higher = better. Cost reflects what I actually pay (OpenAI has really generous limits), not list price. Intelligence is how hard a problem you can hand the model unsupervised. Taste covers UI/UX, code quality, API design, and copy.
-
-| model | cost | intelligence | taste | best for |
-|-------|------|-------------|-------|----------|
-| `openai/gpt-5.6-sol` | 6 | 10 | 9 | hardest unsupervised problems, architecture decisions, complex reasoning |
-| `anthropic/claude-fable-5` | 2 | 9 | 9 | hard unsupervised problems, architecture -- most expensive per intelligence unit |
-| `openai/gpt-5.6-terra` | 7 | 9 | 8 | review, planning, multi-step reasoning, complex coding tasks |
-| `anthropic/claude-opus-4-8` | 4 | 7 | 8 | review, planning, complex multi-step reasoning |
-| `anthropic/claude-sonnet-5` | 5 | 5 | 7 | UI, copy, API design -- taste-sensitive work |
-| `openai/gpt-5.6-luna` | 9 | 8 | 6 | coding tasks -- best token efficiency, impl, boilerplate, data transforms |
-| `openai/gpt-5.5` | 8 | 8 | 5 | bulk/mechanical -- less efficient than luna for same capability tier |
-| `opencode-go/kimi-k2.7-code` | 10 | 4 | 4 | high-volume file edits with a clear, locked spec |
-
-Rules:
-
-- Bulk/mechanical (clear-spec impl, data analysis, migrations): `kimi-k2.7-code`; escalate to `openai/gpt-5.6-luna` if output misses the bar -- luna is the sweet spot for coding tasks.
-- Anything user-facing (UI, copy, API design) needs taste >= 7: `anthropic/claude-sonnet-5` or higher.
-- Review / second opinion / complex reasoning: `openai/gpt-5.6-terra` or `anthropic/claude-fable-5`.
-- Hardest unsupervised problems, architecture: `openai/gpt-5.6-sol`.
-- Cost is a tie-breaker only; when axes conflict for anything that ships, intelligence > taste > cost.
-- These are defaults -- override without asking if cheaper output does not meet the bar. Escalating costs less than shipping mediocre work.
-
----
-
-## Spawning Agents via `opencode run`
+Use the `agent-orchestration` skill to select the model, construct the worker prompt, and verify its output. This skill adds one worktree-specific invariant: every repository worker must start inside the worktree it will modify.
 
 ```bash
-# General syntax
-opencode run "self-contained task prompt" -m <model-id>
-
-# Bulk/mechanical (effectively free)
-opencode run "implement X per spec in src/foo.ts -- return only the final file" \
-  -m opencode-go/kimi-k2.7-code
-
-# User-facing work
-opencode run "redesign the BookingForm component, match existing Tailwind tokens" \
-  -m anthropic/claude-sonnet-5
-
-# Efficient coding task
-opencode run "implement X per spec in src/foo.ts -- return only the final file" \
+opencode run "ROLE: worker (implementer). Work only in this repository. ..." \
+  --agent worker \
+  --dir "$WORKTREE" \
   -m openai/gpt-5.6-luna
-
-# High-intelligence unsupervised task
-opencode run "audit the auth flow in src/auth/ for security issues, output findings as a list" \
-  -m openai/gpt-5.6-sol
-
-# Review / second opinion / complex reasoning
-opencode run "review this implementation plan for edge cases: ..." \
-  -m openai/gpt-5.6-terra
 ```
 
-### Prompt requirements for `opencode run`
+`--dir "$WORKTREE"` roots the worker's sandbox in the target checkout. Do not start it in the main checkout and give it absolute paths into another worktree; direct cross-worktree access is blocked and can force a fragile export/apply handoff through `/tmp`.
 
-Prompts must be **self-contained** -- the spawned agent has no prior context:
-
-- Include exact file paths and relevant constraints.
-- Specify the expected output format (file content, diff, JSON, list).
-- Do not reference "the previous conversation" or "the task above".
-
-### Subagent delegation inside an opencode session
-
-Use `@execution` or `@ui` to delegate within a session (model fixed by `opencode.json`):
-
-- `@execution` -- `opencode-go/kimi-k2.7-code` -- fast, cheap, code-focused
-- `@ui` -- frontend/visual work, uses session default
-
-For a task that needs a specific model not in the agent config, use `opencode run` directly instead.
-
-### Parallel agents
-
-Run multiple agents in parallel by backgrounding each call:
-
-```bash
-opencode run "task A ..." -m anthropic/claude-sonnet-5 &
-opencode run "task B ..." -m opencode-go/kimi-k2.7-code &
-wait
-```
+For parallel worktrees, launch one worker per worktree and give every worker its own `--dir`. Tasks that need results from another worktree should return them to the orchestrator, which verifies and combines them without granting workers cross-worktree access.

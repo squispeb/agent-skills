@@ -66,9 +66,18 @@ Never accept subagent output unread; check it against the acceptance criteria fr
 
 ## `opencode run`
 
+Choose the worker's execution directory before spawning it. For repository work, `--dir` is required and must point at the repository or worktree the worker will modify. The worker's sandbox is rooted there, so it can use ordinary relative paths without crossing a worktree boundary.
+
+```bash
+TASK_DIR="$(git rev-parse --show-toplevel)" # or the absolute target worktree path
+```
+
+Never spawn in one worktree and instruct the worker to edit another. That triggers sandbox restrictions and leads to brittle `/tmp` patch handoffs. Spawn one worker directly inside each target worktree instead; if work spans multiple worktrees, split it by worktree and let the orchestrator combine the verified results.
+
 ```bash
 opencode run "ROLE: worker (implementer). Implement the validation rules from the attached spec in src/foo.ts and add focused tests in src/foo.test.ts. Acceptance: tests pass, public API unchanged. Return a patch." \
-  -f docs/validation-spec.md -m openai/gpt-5.6-luna --title "validation-rules"
+  --agent worker --dir "$TASK_DIR" -f "$TASK_DIR/docs/validation-spec.md" \
+  -m openai/gpt-5.6-luna --title "validation-rules"
 ```
 
 Every prompt must be self-contained: role prefix, exact file paths, task boundaries, explicit acceptance criteria (you verify against them), and the output format (file content, patch, JSON, findings list). Never reference "the previous conversation" or other context the worker cannot see.
@@ -79,7 +88,7 @@ Flags for constructing workers:
 |------|-----|
 | `-m provider/model` | model per the table above |
 | `--agent worker` | spawn through the restricted worker agent (see Roles) |
-| `--dir <path>` | run in another directory or git worktree without `cd` |
+| `--dir <path>` | required for repository work; root the worker in the target repository/worktree |
 | `--file <path>` (`-f`) | attach spec/reference files instead of pasting them |
 | `--format json` | machine-readable event stream for parsing output |
 | `--title "<label>"` | keeps parallel sessions attributable in `opencode session list` |
@@ -92,8 +101,8 @@ Flags for constructing workers:
 Only parallelize independent tasks: no overlapping file edits, no dependency on each other's output. Redirect each worker to its own log or the interleaved stdout is unattributable.
 
 ```bash
-opencode run "ROLE: worker (ui). task A ..." -m anthropic/claude-sonnet-5        > /tmp/task-a.log 2>&1 &
-opencode run "ROLE: worker (executor). task B ..." -m opencode-go/kimi-k2.7-code > /tmp/task-b.log 2>&1 &
+opencode run "ROLE: worker (ui). task A ..." --agent worker --dir "$WORKTREE_A" -m anthropic/claude-sonnet-5         > /tmp/task-a.log 2>&1 &
+opencode run "ROLE: worker (executor). task B ..." --agent worker --dir "$WORKTREE_B" -m opencode-go/kimi-k2.7-code > /tmp/task-b.log 2>&1 &
 wait
 # verify each log separately before accepting
 ```
