@@ -34,15 +34,15 @@ source package during local development.
 
 ## Agent definitions
 
-`agents/opencode/worker.md` is a restricted opencode agent used by
-`agent-orchestration` for structural loop prevention: it denies the `task`
-tool and any `opencode *` bash command, so a spawned worker cannot recurse
-into spawning its own subagents. `bunx skills` does not install agent
-definitions, so copy it once per machine:
+`agent-orchestration/worker.md` is a restricted opencode agent used by the
+skill for structural loop prevention: it denies the `task` tool and any
+`opencode *` bash command, so a spawned worker cannot recurse into spawning
+its own subagents. It ships inside the skill directory, so installers copy it
+along with the skill; activate it once per machine:
 
 ```bash
 mkdir -p ~/.config/opencode/agents
-cp agents/opencode/worker.md ~/.config/opencode/agents/worker.md
+cp ~/.agents/skills/agent-orchestration/worker.md ~/.config/opencode/agents/worker.md
 ```
 
 Then spawn workers with `opencode run "..." --agent worker -m <model>`.

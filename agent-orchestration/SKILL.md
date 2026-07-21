@@ -10,180 +10,90 @@ description: >-
 
 # Agent Orchestration
 
-Spawn subagents with `opencode run`. It is a plain CLI command, so any harness with a shell tool (Claude Code, Codex, Cursor, Gemini CLI, opencode itself) can orchestrate the same way. The workflow is always: assess the task's required intelligence and taste, pick the cheapest model that clears both floors, write a self-contained prompt, then verify the output before accepting it.
-
-Do not delegate a task smaller than the prompt needed to describe it — do it inline instead.
+Spawn subagents with `opencode run` -- a plain CLI command, so any harness with a shell tool (Claude Code, Codex, Cursor, Gemini CLI, opencode itself) orchestrates the same way. Workflow: assess the task's floors, pick the cheapest model that clears them, write a self-contained prompt, verify the output before accepting it. Do not delegate a task smaller than the prompt needed to describe it -- do it inline.
 
 ## Roles: Orchestrator and Worker
 
-Spawned subagents load this same skill, so without an explicit role boundary a worker will re-orchestrate and spawn its own subagents, recursing indefinitely. The role field breaks that loop:
+Spawned subagents load this same skill; without a role boundary a worker re-orchestrates and recurses indefinitely. Only the orchestrator -- the agent talking to the user -- may call `opencode run`.
 
-- **orchestrator** — the agent talking to the user. It decomposes work, assesses floors, spawns workers, and verifies output. Only the orchestrator may call `opencode run`.
-- **worker** — a spawned agent. It executes its task directly with its own tools and returns the requested output. A worker never spawns subagents, never delegates, and never applies this skill's spawning sections.
+- Every delegated prompt MUST begin with `ROLE: worker (<archetype>).`
+- **If your own task prompt begins with `ROLE: worker`, you are the worker.** Execute directly with your own tools and return the requested output. Never spawn subagents, even if the task looks decomposable -- if it is too big to do directly, return a message saying it needs decomposition and let the orchestrator split it.
 
-Enforcement is two-sided:
-
-1. Every delegated prompt MUST begin with `ROLE: worker.` followed by the archetype, for example `ROLE: worker (implementer).`
-2. **If your own task prompt begins with `ROLE: worker`, you are the worker.** Do the work directly and return the output. This skill does not authorize you to run `opencode run`, even if the task looks decomposable — if it is too big to do directly, return a message saying the task needs decomposition instead of spawning.
-
-If a task genuinely needs sub-delegation, that decision belongs to the orchestrator: report back, and let it split the task into separate workers.
-
-### Structural enforcement (opencode)
-
-The `ROLE:` prefix is a convention; opencode can also enforce the boundary so recursion is impossible. Define one global worker agent at `~/.config/opencode/agents/worker.md` (global config, so it works in every project without per-project setup):
-
-```markdown
----
-description: Execution-only worker for orchestrated tasks; cannot spawn subagents
-mode: all
-permission:
-  task: deny
-  bash:
-    "opencode *": deny
-    "*": allow
----
-
-You are a worker spawned by an orchestrator. Execute the task in your prompt
-directly with your own tools and return the requested output format. Never
-delegate: if the task is too large to complete directly, stop and return a
-message saying it needs decomposition.
-```
-
-Spawn workers through it with `--agent worker`; the model still comes from `-m`, so this one file covers every archetype:
+**Structural enforcement (opencode):** this skill's directory ships `worker.md`, a restricted agent definition that denies the `task` tool and all `opencode *` bash commands, so a worker cannot recurse even if it ignores its prompt. Install once per machine, then spawn with `--agent worker`:
 
 ```bash
-opencode run "ROLE: worker (implementer). ..." --agent worker -m openai/gpt-5.6-luna
+cp <this-skill-dir>/worker.md ~/.config/opencode/agents/worker.md
 ```
 
-`task: deny` blocks in-session subagents and the bash rule blocks `opencode run` itself, so even a worker that ignores its prompt cannot recurse. Keep the `ROLE:` prefix anyway — it is the only protection when the agent file is missing or when spawning from a harness other than opencode.
+Keep the `ROLE:` prefix regardless -- it is the only protection on other harnesses or when the agent file is missing.
 
 ## Assessing the Required Intelligence
 
-Classify the task by observable traits before touching the model table. The floor is the minimum intelligence rating the chosen model must have.
+Classify the task by observable traits before picking a model. The floor is the minimum intelligence rating the model must have.
 
 | task traits | intelligence floor |
 |-------------|--------------------|
-| Locked spec, mechanically verifiable output: renames, migrations, boilerplate from a template, format conversions | 4 |
+| Locked spec, mechanically verifiable output: renames, migrations, boilerplate, format conversions | 4 |
 | Standard implementation with existing patterns to copy and clear acceptance criteria | 8 |
 | Ambiguous scope, cross-file reasoning, or judgment calls you cannot pre-specify in the prompt | 9 |
 | Expensive-to-reverse decisions: architecture, data models, public APIs, security audits | 10 |
 
-Two supplementary rules:
+Anything user-facing (UI, copy, API design) additionally needs taste >= 7. Mixed tasks take the highest floor present; when axes conflict for work that ships, resolve intelligence, then taste, then cost.
 
-- **Taste floor:** anything user-facing (UI, copy, API design) additionally needs taste >= 7, regardless of the intelligence floor.
-- **Mixed tasks:** take the highest floor among the traits present. When axes conflict for work that ships, resolve in this order: intelligence, then taste, then cost.
+## Models and Archetypes
 
-## Model Rankings
+Pick the cheapest row whose intelligence AND taste clear the task's floors. Rankings 1-10, higher = better; cost reflects actual paid cost, not list price.
 
-Rankings 1-10: higher = better. Cost reflects actual paid cost, not list price. Intelligence is how hard a problem can be handed to the model unsupervised. Taste covers UI/UX, code quality, API design, and copy.
+| archetype (floor) | model | cost | int | taste | prompt must include |
+|-------------------|-------|------|-----|-------|---------------------|
+| executor (4) | `opencode-go/kimi-k2.7-code` | 10 | 4 | 4 | locked spec verbatim, exact file paths, output format |
+| implementer (8) | `openai/gpt-5.6-luna` | 9 | 8 | 6 | acceptance criteria, test expectations, patch format |
+| ui / copy (taste >= 7) | `anthropic/claude-sonnet-5` | 5 | 5 | 7 | design constraints, tokens/components to match, accessibility requirements |
+| reviewer (9) | `openai/gpt-5.6-terra` | 7 | 9 | 8 | artifact to review inline, review dimensions, findings-list format |
+| architect (10) | `openai/gpt-5.6-sol` | 6 | 10 | 9 | full context and constraints; output decision + rationale + rejected alternatives |
 
-| model | cost | intelligence | taste | best for |
-|-------|------|-------------|-------|----------|
-| `openai/gpt-5.6-sol` | 6 | 10 | 9 | hardest unsupervised problems, architecture decisions, complex reasoning |
-| `anthropic/claude-fable-5` | 2 | 9 | 9 | hard unsupervised problems, architecture -- most expensive per intelligence unit |
-| `openai/gpt-5.6-terra` | 7 | 9 | 8 | review, planning, multi-step reasoning, complex coding tasks |
-| `anthropic/claude-opus-4-8` | 4 | 7 | 8 | review, planning, complex multi-step reasoning |
-| `anthropic/claude-sonnet-5` | 5 | 5 | 7 | UI, copy, API design -- taste-sensitive work |
-| `openai/gpt-5.6-luna` | 9 | 8 | 6 | coding tasks -- best token efficiency, impl, boilerplate, data transforms |
-| `openai/gpt-5.5` | 8 | 8 | 5 | bulk/mechanical -- less efficient than luna for same capability tier |
-| `opencode-go/kimi-k2.7-code` | 10 | 4 | 4 | high-volume file edits with a clear, locked spec |
+Alternates when a default does not fit: `anthropic/claude-fable-5` (int 9, taste 9, cost 2 -- most expensive per intelligence unit), `anthropic/claude-opus-4-8` (int 7, taste 8, cost 4 -- review and planning), `openai/gpt-5.5` (int 8, taste 5, cost 8 -- bulk work, less efficient than luna).
 
-## Selection Rules
-
-Pick the cheapest model whose intelligence AND taste both clear the task's floors. The common cases resolve to:
-
-- Floor 4 (bulk/mechanical, locked spec): `opencode-go/kimi-k2.7-code`.
-- Floor 8 (standard implementation, boilerplate, data transforms): `openai/gpt-5.6-luna`.
-- Taste >= 7 (user-facing UI, copy, API design): any model with taste 7 or above -- `anthropic/claude-sonnet-5` is the cheapest that qualifies; use a higher-intelligence model from that set if the task is also hard.
-- Floor 9 (review, second opinions, planning, ambiguous scope): `openai/gpt-5.6-terra` or `anthropic/claude-fable-5`.
-- Floor 10 (architecture, expensive-to-reverse decisions): `openai/gpt-5.6-sol`.
-
-Treat these as defaults. Escalate without asking when a cheaper model will not meet the required quality bar -- escalating costs less than shipping mediocre work.
+Escalate without asking when a cheaper model will not meet the bar -- escalating costs less than shipping mediocre work.
 
 ## Verifying and Escalating
 
-Never accept subagent output unread. Check it against the acceptance criteria you put in the prompt. When it misses the bar, diagnose which failure it is before retrying, because the fixes are different:
+Never accept subagent output unread; check it against the acceptance criteria from the prompt. Diagnose failures before retrying:
 
-1. **Spec failure** -- the output is competent but solves the wrong problem or misses a constraint. The prompt was ambiguous. Re-prompt the SAME model with the correction; escalating the model will not fix a bad spec. In opencode, continue the worker's session so it keeps its context instead of starting over: `opencode run --session <id> "Correction: ..."` (find the ID with `opencode session list`).
-2. **Capability failure** -- the spec was clear but the output is wrong, shallow, or incomplete. Escalate one intelligence tier (kimi -> luna -> terra -> sol) and re-run with the same prompt.
+1. **Spec failure** -- competent output, wrong problem. Re-prompt the SAME model with the correction; in opencode, continue the worker's session so it keeps context: `opencode run --session <id> "Correction: ..."` (IDs via `opencode session list`).
+2. **Capability failure** -- clear spec, wrong or shallow output. Escalate one intelligence tier (kimi -> luna -> terra -> sol) and re-run the same prompt.
 3. **Repeated capability failure** -- two escalations without acceptable output means the task is not delegable as specified. Do it yourself or decompose it into smaller tasks with lower floors.
 
 ## `opencode run`
 
 ```bash
-opencode run "self-contained task prompt" -m <model-id>
+opencode run "ROLE: worker (implementer). Implement the validation rules from the attached spec in src/foo.ts and add focused tests in src/foo.test.ts. Acceptance: tests pass, public API unchanged. Return a patch." \
+  -f docs/validation-spec.md -m openai/gpt-5.6-luna --title "validation-rules"
 ```
 
-Flags that matter when constructing a worker (verified against the opencode CLI docs):
+Every prompt must be self-contained: role prefix, exact file paths, task boundaries, explicit acceptance criteria (you verify against them), and the output format (file content, patch, JSON, findings list). Never reference "the previous conversation" or other context the worker cannot see.
+
+Flags for constructing workers:
 
 | flag | use |
 |------|-----|
-| `-m provider/model` | model selection per the floors above |
-| `--agent worker` | spawn through the restricted worker agent definition (see Structural enforcement) |
-| `--dir <path>` | run the worker in another directory or git worktree without `cd` |
-| `--file <path>` (`-f`) | attach a spec or reference file instead of pasting it into the prompt |
-| `--format json` | raw JSON event stream when the orchestrator needs to parse the output |
-| `--title "<label>"` | names the session so parallel runs stay attributable in `opencode session list` |
-| `--auto` | auto-approve anything not explicitly denied -- required for unattended workers; pair it with the restricted worker agent so denies still hold |
-| `--session <id>` (`-s`), `--fork` | continue or fork an existing worker session -- use for re-prompting so the worker keeps its context |
-| `--variant <effort>` | provider-specific reasoning effort for models that support it |
-
-Write every delegated prompt so the agent can act without prior conversation context:
-
-- Begin with `ROLE: worker (<archetype>).` so the spawned agent knows it must execute, not re-orchestrate.
-- Include exact file paths, task boundaries, acceptance criteria, and relevant constraints.
-- Specify the desired output format: file content, patch/diff, JSON, findings list, or another exact form.
-- State the acceptance criteria explicitly -- you will verify against them when the agent returns.
-- Do not reference "the previous conversation", "the task above", or other unavailable context.
-
-Examples:
-
-```bash
-# Floor 4: mechanical edit, locked spec
-opencode run "ROLE: worker (executor). Implement the supplied spec in src/foo.ts. Preserve the public API. Return only the final file content." \
-  -m opencode-go/kimi-k2.7-code
-
-# Taste >= 7: user-facing UI work
-opencode run "ROLE: worker (ui). Redesign src/components/BookingForm.tsx. Match existing Tailwind tokens and preserve mobile accessibility. Return a patch." \
-  -m anthropic/claude-sonnet-5
-
-# Floor 8: standard implementation
-opencode run "ROLE: worker (implementer). Implement the supplied validation rules in src/foo.ts and add focused tests in src/foo.test.ts. Return a patch." \
-  -m openai/gpt-5.6-luna
-
-# Floor 10: security-sensitive audit
-opencode run "ROLE: worker (architect). Audit src/auth/ for security vulnerabilities. Inspect all relevant files and return a severity-ranked findings list with file and line references." \
-  -m openai/gpt-5.6-sol
-
-# Floor 9: review / second opinion
-opencode run "ROLE: worker (reviewer). Review this implementation plan for correctness, edge cases, and missing tests: <plan>. Return a concise findings list." \
-  -m openai/gpt-5.6-terra
-```
-
-## Subagent Archetypes
-
-Do not depend on harness-configured agents (opencode `@execution`/`@ui`, Claude Code subagent types) -- they require per-project or per-user config that may not exist where you are running. Instead, define the subagent's role inside the prompt itself and spawn it with `opencode run`, which behaves identically from every harness.
-
-Each archetype is a model choice plus what the prompt must contain for the output to be verifiable:
-
-| archetype | model | prompt must include |
-|-----------|-------|---------------------|
-| executor (floor 4) | `opencode-go/kimi-k2.7-code` | the locked spec verbatim, exact file paths, output format |
-| implementer (floor 8) | `openai/gpt-5.6-luna` | acceptance criteria, test expectations, patch format |
-| ui / copy (taste >= 7) | `anthropic/claude-sonnet-5` | design constraints, existing tokens/components to match, accessibility requirements |
-| reviewer (floor 9) | `openai/gpt-5.6-terra` | the artifact to review inline, the review dimensions, findings-list format |
-| architect (floor 10) | `openai/gpt-5.6-sol` | full problem context and constraints, required output: decision plus rationale plus rejected alternatives |
+| `-m provider/model` | model per the table above |
+| `--agent worker` | spawn through the restricted worker agent (see Roles) |
+| `--dir <path>` | run in another directory or git worktree without `cd` |
+| `--file <path>` (`-f`) | attach spec/reference files instead of pasting them |
+| `--format json` | machine-readable event stream for parsing output |
+| `--title "<label>"` | keeps parallel sessions attributable in `opencode session list` |
+| `--auto` | auto-approve anything not denied -- required unattended; pair with `--agent worker` so denies hold |
+| `--session <id>` (`-s`), `--fork` | continue/fork a worker session for re-prompting |
+| `--variant <effort>` | provider-specific reasoning effort |
 
 ## Parallel Work
 
-Only run tasks in parallel when they are independent: no overlapping file edits and no dependency on each other's output. Redirect each agent's output to its own file, otherwise the interleaved stdout makes results unattributable.
+Only parallelize independent tasks: no overlapping file edits, no dependency on each other's output. Redirect each worker to its own log or the interleaved stdout is unattributable.
 
 ```bash
-opencode run "ROLE: worker (ui). task A ..." -m anthropic/claude-sonnet-5           > /tmp/agent-task-a.log 2>&1 &
-opencode run "ROLE: worker (executor). task B ..." -m opencode-go/kimi-k2.7-code    > /tmp/agent-task-b.log 2>&1 &
+opencode run "ROLE: worker (ui). task A ..." -m anthropic/claude-sonnet-5        > /tmp/task-a.log 2>&1 &
+opencode run "ROLE: worker (executor). task B ..." -m opencode-go/kimi-k2.7-code > /tmp/task-b.log 2>&1 &
 wait
-
-# Verify each result separately before accepting it
-cat /tmp/agent-task-a.log
-cat /tmp/agent-task-b.log
+# verify each log separately before accepting
 ```
