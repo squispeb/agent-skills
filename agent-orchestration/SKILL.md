@@ -14,6 +14,20 @@ Spawn subagents with `opencode run`. It is a plain CLI command, so any harness w
 
 Do not delegate a task smaller than the prompt needed to describe it — do it inline instead.
 
+## Roles: Orchestrator and Worker
+
+Spawned subagents load this same skill, so without an explicit role boundary a worker will re-orchestrate and spawn its own subagents, recursing indefinitely. The role field breaks that loop:
+
+- **orchestrator** — the agent talking to the user. It decomposes work, assesses floors, spawns workers, and verifies output. Only the orchestrator may call `opencode run`.
+- **worker** — a spawned agent. It executes its task directly with its own tools and returns the requested output. A worker never spawns subagents, never delegates, and never applies this skill's spawning sections.
+
+Enforcement is two-sided:
+
+1. Every delegated prompt MUST begin with `ROLE: worker.` followed by the archetype, for example `ROLE: worker (implementer).`
+2. **If your own task prompt begins with `ROLE: worker`, you are the worker.** Do the work directly and return the output. This skill does not authorize you to run `opencode run`, even if the task looks decomposable — if it is too big to do directly, return a message saying the task needs decomposition instead of spawning.
+
+If a task genuinely needs sub-delegation, that decision belongs to the orchestrator: report back, and let it split the task into separate workers.
+
 ## Assessing the Required Intelligence
 
 Classify the task by observable traits before touching the model table. The floor is the minimum intelligence rating the chosen model must have.
@@ -73,6 +87,7 @@ opencode run "self-contained task prompt" -m <model-id>
 
 Write every delegated prompt so the agent can act without prior conversation context:
 
+- Begin with `ROLE: worker (<archetype>).` so the spawned agent knows it must execute, not re-orchestrate.
 - Include exact file paths, task boundaries, acceptance criteria, and relevant constraints.
 - Specify the desired output format: file content, patch/diff, JSON, findings list, or another exact form.
 - State the acceptance criteria explicitly -- you will verify against them when the agent returns.
@@ -82,23 +97,23 @@ Examples:
 
 ```bash
 # Floor 4: mechanical edit, locked spec
-opencode run "Implement the supplied spec in src/foo.ts. Preserve the public API. Return only the final file content." \
+opencode run "ROLE: worker (executor). Implement the supplied spec in src/foo.ts. Preserve the public API. Return only the final file content." \
   -m opencode-go/kimi-k2.7-code
 
 # Taste >= 7: user-facing UI work
-opencode run "Redesign src/components/BookingForm.tsx. Match existing Tailwind tokens and preserve mobile accessibility. Return a patch." \
+opencode run "ROLE: worker (ui). Redesign src/components/BookingForm.tsx. Match existing Tailwind tokens and preserve mobile accessibility. Return a patch." \
   -m anthropic/claude-sonnet-5
 
 # Floor 8: standard implementation
-opencode run "Implement the supplied validation rules in src/foo.ts and add focused tests in src/foo.test.ts. Return a patch." \
+opencode run "ROLE: worker (implementer). Implement the supplied validation rules in src/foo.ts and add focused tests in src/foo.test.ts. Return a patch." \
   -m openai/gpt-5.6-luna
 
 # Floor 10: security-sensitive audit
-opencode run "Audit src/auth/ for security vulnerabilities. Inspect all relevant files and return a severity-ranked findings list with file and line references." \
+opencode run "ROLE: worker (architect). Audit src/auth/ for security vulnerabilities. Inspect all relevant files and return a severity-ranked findings list with file and line references." \
   -m openai/gpt-5.6-sol
 
 # Floor 9: review / second opinion
-opencode run "Review this implementation plan for correctness, edge cases, and missing tests: <plan>. Return a concise findings list." \
+opencode run "ROLE: worker (reviewer). Review this implementation plan for correctness, edge cases, and missing tests: <plan>. Return a concise findings list." \
   -m openai/gpt-5.6-terra
 ```
 
@@ -121,8 +136,8 @@ Each archetype is a model choice plus what the prompt must contain for the outpu
 Only run tasks in parallel when they are independent: no overlapping file edits and no dependency on each other's output. Redirect each agent's output to its own file, otherwise the interleaved stdout makes results unattributable.
 
 ```bash
-opencode run "task A ..." -m anthropic/claude-sonnet-5      > /tmp/agent-task-a.log 2>&1 &
-opencode run "task B ..." -m opencode-go/kimi-k2.7-code     > /tmp/agent-task-b.log 2>&1 &
+opencode run "ROLE: worker (ui). task A ..." -m anthropic/claude-sonnet-5           > /tmp/agent-task-a.log 2>&1 &
+opencode run "ROLE: worker (executor). task B ..." -m opencode-go/kimi-k2.7-code    > /tmp/agent-task-b.log 2>&1 &
 wait
 
 # Verify each result separately before accepting it
