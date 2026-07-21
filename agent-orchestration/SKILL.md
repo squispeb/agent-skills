@@ -28,6 +28,35 @@ Enforcement is two-sided:
 
 If a task genuinely needs sub-delegation, that decision belongs to the orchestrator: report back, and let it split the task into separate workers.
 
+### Structural enforcement (opencode)
+
+The `ROLE:` prefix is a convention; opencode can also enforce the boundary so recursion is impossible. Define one global worker agent at `~/.config/opencode/agents/worker.md` (global config, so it works in every project without per-project setup):
+
+```markdown
+---
+description: Execution-only worker for orchestrated tasks; cannot spawn subagents
+mode: all
+permission:
+  task: deny
+  bash:
+    "opencode *": deny
+    "*": allow
+---
+
+You are a worker spawned by an orchestrator. Execute the task in your prompt
+directly with your own tools and return the requested output format. Never
+delegate: if the task is too large to complete directly, stop and return a
+message saying it needs decomposition.
+```
+
+Spawn workers through it with `--agent worker`; the model still comes from `-m`, so this one file covers every archetype:
+
+```bash
+opencode run "ROLE: worker (implementer). ..." --agent worker -m openai/gpt-5.6-luna
+```
+
+`task: deny` blocks in-session subagents and the bash rule blocks `opencode run` itself, so even a worker that ignores its prompt cannot recurse. Keep the `ROLE:` prefix anyway — it is the only protection when the agent file is missing or when spawning from a harness other than opencode.
+
 ## Assessing the Required Intelligence
 
 Classify the task by observable traits before touching the model table. The floor is the minimum intelligence rating the chosen model must have.
@@ -75,7 +104,7 @@ Treat these as defaults. Escalate without asking when a cheaper model will not m
 
 Never accept subagent output unread. Check it against the acceptance criteria you put in the prompt. When it misses the bar, diagnose which failure it is before retrying, because the fixes are different:
 
-1. **Spec failure** -- the output is competent but solves the wrong problem or misses a constraint. The prompt was ambiguous. Re-run the SAME model with a corrected, tighter prompt; escalating the model will not fix a bad spec.
+1. **Spec failure** -- the output is competent but solves the wrong problem or misses a constraint. The prompt was ambiguous. Re-prompt the SAME model with the correction; escalating the model will not fix a bad spec. In opencode, continue the worker's session so it keeps its context instead of starting over: `opencode run --session <id> "Correction: ..."` (find the ID with `opencode session list`).
 2. **Capability failure** -- the spec was clear but the output is wrong, shallow, or incomplete. Escalate one intelligence tier (kimi -> luna -> terra -> sol) and re-run with the same prompt.
 3. **Repeated capability failure** -- two escalations without acceptable output means the task is not delegable as specified. Do it yourself or decompose it into smaller tasks with lower floors.
 
@@ -84,6 +113,20 @@ Never accept subagent output unread. Check it against the acceptance criteria yo
 ```bash
 opencode run "self-contained task prompt" -m <model-id>
 ```
+
+Flags that matter when constructing a worker (verified against the opencode CLI docs):
+
+| flag | use |
+|------|-----|
+| `-m provider/model` | model selection per the floors above |
+| `--agent worker` | spawn through the restricted worker agent definition (see Structural enforcement) |
+| `--dir <path>` | run the worker in another directory or git worktree without `cd` |
+| `--file <path>` (`-f`) | attach a spec or reference file instead of pasting it into the prompt |
+| `--format json` | raw JSON event stream when the orchestrator needs to parse the output |
+| `--title "<label>"` | names the session so parallel runs stay attributable in `opencode session list` |
+| `--auto` | auto-approve anything not explicitly denied -- required for unattended workers; pair it with the restricted worker agent so denies still hold |
+| `--session <id>` (`-s`), `--fork` | continue or fork an existing worker session -- use for re-prompting so the worker keeps its context |
+| `--variant <effort>` | provider-specific reasoning effort for models that support it |
 
 Write every delegated prompt so the agent can act without prior conversation context:
 

@@ -29,8 +29,23 @@ source package during local development.
 
 ## Skills
 
-- `agent-orchestration`: selects models, writes self-contained prompts, and coordinates parallel agents.
+- `agent-orchestration`: assesses task difficulty, selects models, writes self-contained worker prompts, and coordinates parallel agents.
 - `worktree-spawn`: creates worktrees, copies local configuration, and selects models for subagents.
+
+## Agent definitions
+
+`agents/opencode/worker.md` is a restricted opencode agent used by
+`agent-orchestration` for structural loop prevention: it denies the `task`
+tool and any `opencode *` bash command, so a spawned worker cannot recurse
+into spawning its own subagents. `bunx skills` does not install agent
+definitions, so copy it once per machine:
+
+```bash
+mkdir -p ~/.config/opencode/agents
+cp agents/opencode/worker.md ~/.config/opencode/agents/worker.md
+```
+
+Then spawn workers with `opencode run "..." --agent worker -m <model>`.
 
 ## Ownership
 
