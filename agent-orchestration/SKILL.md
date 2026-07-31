@@ -47,12 +47,15 @@ Pick the cheapest row whose intelligence AND taste clear the task's floors. Rank
 | archetype (floor) | model | cost | int | taste | prompt must include |
 |-------------------|-------|------|-----|-------|---------------------|
 | executor (4) | `opencode-go/kimi-k2.7-code` | 10 | 4 | 4 | locked spec verbatim, exact file paths, output format |
-| implementer (8) | `openai/gpt-5.6-luna` | 9 | 8 | 6 | acceptance criteria, test expectations, patch format |
-| ui / copy (taste >= 7) | `anthropic/claude-sonnet-5` | 5 | 5 | 7 | design constraints, tokens/components to match, accessibility requirements |
+| implementer (8) | `opencode-go/deepseek-v4-flash` | 10 | 8 | 5 | acceptance criteria, test expectations, patch format |
+| editor (8) | `openai/gpt-5.6-luna` | 9 | 8 | 6 | acceptance criteria, files in scope, patch format |
+| ui / copy (taste >= 7) | `openai/gpt-5.6-terra` | 7 | 9 | 8 | design constraints, tokens/components to match, accessibility requirements |
 | reviewer (9) | `openai/gpt-5.6-terra` | 7 | 9 | 8 | artifact to review inline, review dimensions, findings-list format |
 | architect (10) | `openai/gpt-5.6-sol` | 6 | 10 | 9 | full context and constraints; output decision + rationale + rejected alternatives |
 
-Alternates when a default does not fit: `anthropic/claude-fable-5` (int 9, taste 9, cost 2 -- most expensive per intelligence unit), `anthropic/claude-opus-4-8` (int 7, taste 8, cost 4 -- review and planning), `openai/gpt-5.5` (int 8, taste 5, cost 8 -- bulk work, less efficient than luna).
+Implementer and editor share floor 8: `deepseek-v4-flash` is subscription-covered so it is the default for clear-spec implementation; `gpt-5.6-luna` follows instructions more reliably across many files and long diffs, so use it when the edit spans the codebase -- it is also the first escalation when deepseek's output misses.
+
+Alternates when a default does not fit: `anthropic/claude-fable-5` (int 10, taste 9, cost 2 -- most expensive per intelligence unit), `anthropic/claude-opus-4-8` (int 9, taste 8, cost 4 -- review and planning).
 
 Escalate without asking when a cheaper model will not meet the bar -- escalating costs less than shipping mediocre work.
 
@@ -61,7 +64,7 @@ Escalate without asking when a cheaper model will not meet the bar -- escalating
 Never accept subagent output unread; check it against the acceptance criteria from the prompt. Diagnose failures before retrying:
 
 1. **Spec failure** -- competent output, wrong problem. Re-prompt the SAME model with the correction; in opencode, continue the worker's session so it keeps context: `opencode run --session <id> "Correction: ..."` (IDs via `opencode session list`).
-2. **Capability failure** -- clear spec, wrong or shallow output. Escalate one intelligence tier (kimi -> luna -> terra -> sol) and re-run the same prompt.
+2. **Capability failure** -- clear spec, wrong or shallow output. Escalate one intelligence tier (kimi -> deepseek -> luna -> terra -> sol) and re-run the same prompt.
 3. **Repeated capability failure** -- two escalations without acceptable output means the task is not delegable as specified. Do it yourself or decompose it into smaller tasks with lower floors.
 
 ## `opencode run`
@@ -77,7 +80,7 @@ Never spawn in one worktree and instruct the worker to edit another. That trigge
 ```bash
 opencode run "ROLE: worker (implementer). Implement the validation rules from the attached spec in src/foo.ts and add focused tests in src/foo.test.ts. Acceptance: tests pass, public API unchanged. Return a patch." \
   --agent worker --dir "$TASK_DIR" -f "$TASK_DIR/docs/validation-spec.md" \
-  -m openai/gpt-5.6-luna --title "validation-rules"
+  -m opencode-go/deepseek-v4-flash --title "validation-rules"
 ```
 
 Every prompt must be self-contained: role prefix, exact file paths, task boundaries, explicit acceptance criteria (you verify against them), and the output format (file content, patch, JSON, findings list). Never reference "the previous conversation" or other context the worker cannot see.
@@ -101,7 +104,7 @@ Flags for constructing workers:
 Only parallelize independent tasks: no overlapping file edits, no dependency on each other's output. Redirect each worker to its own log or the interleaved stdout is unattributable.
 
 ```bash
-opencode run "ROLE: worker (ui). task A ..." --agent worker --dir "$WORKTREE_A" -m anthropic/claude-sonnet-5         > /tmp/task-a.log 2>&1 &
+opencode run "ROLE: worker (ui). task A ..." --agent worker --dir "$WORKTREE_A" -m openai/gpt-5.6-terra             > /tmp/task-a.log 2>&1 &
 opencode run "ROLE: worker (executor). task B ..." --agent worker --dir "$WORKTREE_B" -m opencode-go/kimi-k2.7-code > /tmp/task-b.log 2>&1 &
 wait
 # verify each log separately before accepting
