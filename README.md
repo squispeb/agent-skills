@@ -34,18 +34,31 @@ source package during local development.
 
 ## Agent definitions
 
-`agent-orchestration/worker.md` is a restricted opencode agent used by the
-skill for structural loop prevention: it denies the `task` tool and any
-`opencode *` bash command, so a spawned worker cannot recurse into spawning
-its own subagents. It ships inside the skill directory, so installers copy it
-along with the skill; activate it once per machine:
+`agent-orchestration/agents/` holds the opencode agent definitions the skill
+delegates to. The skill directory is the source of truth; the copies under
+`~/.config/opencode/agents/` are generated artifacts, so install with an
+overwrite once per machine and after every skill update:
 
 ```bash
 mkdir -p ~/.config/opencode/agents
-cp ~/.agents/skills/agent-orchestration/worker.md ~/.config/opencode/agents/worker.md
+cp ~/.agents/skills/agent-orchestration/agents/*.md ~/.config/opencode/agents/
 ```
 
-Then spawn workers with `opencode run "..." --agent worker -m <model>`.
+Three definitions ship:
+
+- `executor.md` — bounded implementation against a locked spec. Returns
+  `BLOCKED` instead of resolving an ambiguity itself.
+- `architect.md` — advisory only for expensive-to-reverse decisions. No write
+  tools and no shell, so it cannot route around `edit: deny`.
+- `worker.md` — the `opencode run` fallback for non-opencode harnesses. It is
+  `mode: all` because `--agent` rejects subagent-mode agents and silently falls
+  back to the default agent, dropping every denial.
+
+All three deny the `task` tool so a spawned worker cannot recurse, deny
+`opencode *` bash commands, and deny reading `*.env` — opencode ships that read
+as `ask`, and an interactive prompt inside a subagent has nobody to answer it,
+so it hangs instead of failing. Workers source secrets through the shell
+instead. Agent files are read at startup: restart opencode after installing.
 
 ## Ownership
 
