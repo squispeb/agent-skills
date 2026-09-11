@@ -1,7 +1,7 @@
 ---
 description: Resolves expensive-to-reverse decisions — architecture, data models, public APIs, security — and returns a recommendation, never an edit.
 mode: subagent
-model: opencode-go/glm-5.3
+model: anthropic/claude-opus-5
 steps: 20
 permission:
   edit: deny

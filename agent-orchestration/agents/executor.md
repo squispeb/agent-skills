@@ -1,7 +1,7 @@
 ---
 description: Executes bounded, self-contained tasks against a locked spec; returns BLOCKED instead of deciding.
 mode: subagent
-model: opencode-go/glm-5.3-flash
+model: openai/gpt-5.6-luna
 steps: 20
 permission:
   task: deny

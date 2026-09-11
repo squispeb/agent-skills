@@ -76,10 +76,23 @@ Only the user-facing orchestrator may delegate.
 
 ## Choosing a Worker
 
+| tier | route | rationale |
+|---|---|---|
+| trivial/easy | `executor` via `task` → `openai/gpt-5.6-luna` | Plus is $0 marginal, and luna is fastest at 109.4 t/s |
+| medium | primary: `executor` via `task` → `openai/gpt-5.6-luna`; CLI worker via `opencode run --agent worker -m <model>` → `opencode-go/glm-5.3-flash`, `opencode-go/deepseek-v4-flash`, or `opencode-go/deepseek-v4.1-flash` | Use luna first; use the three Go lanes for routine implementation and bounded investigation |
+| hard | CLI `worker` via `opencode run --agent worker -m <model>` → `opencode-go/glm-5.3` or `openai/gpt-5.6-sol` | Use the stronger models when the task needs more judgment; sol is Zen-only and its promotion expires Sep 18, 2026 |
+| critical | primary `architect` via `task` → `anthropic/claude-opus-5`; Fable via CLI `worker -m anthropic/claude-fable-5-1`; Opus fallback | Use the architect lane first; Fable is credit-metered on Pro |
+
+The floors are keyed to cluster membership, not artificial two-point boundaries: the cheap
+cluster is 46.9–48.4 agentic, while the top cluster is 57.8–59.2. `task` accepts no model
+argument, so hard-tier routing must use `opencode run --agent worker -m`; never spawn a
+worker via `task`, because it inherits the orchestrator model. Escalate without asking when
+a cheaper worker will not meet the bar.
+
 | `subagent_type` | model | agentic | intel | $/task | min/task | budget |
 |---|---|---|---|---|---|---|
-| `executor` | `opencode-go/glm-5.3-flash` | 58.2 | 57.5 | ~0.12 est | 12.5 | Go, $15/mo ≈ 125 tasks |
-| `architect` | `opencode-go/glm-5.3` | 59.1 | 59.5 | 0.68 | 7.7 | Go, $15/mo ≈ 22 tasks |
+| `executor` | `openai/gpt-5.6-luna` | 46.9 | 38 | $0.20/$1.20 per 1M | — | Go, $15/mo + Plus $0 marginal; fastest at 109.4 t/s |
+| `architect` | `anthropic/claude-opus-5` | 59.2 | 51 | $0 | — | Pro subscription; updated 2026-09-10; saves the $15 Go bucket; `glm-5.3` demoted to fallback |
 | `worker` | none — caller pins with `-m` | — | — | — | — | whatever you pin |
 
 Use `executor` for anything with a locked spec and mechanically checkable output, and
@@ -99,12 +112,12 @@ dynamically, so edit the agent file rather than silently using the wrong model:
 
 | alternate | agentic | intel | $/task | min/task | use when |
 |---|---|---|---|---|---|
-| `openai/gpt-5.6-luna` | 46.9 | 52.3 | 0.049 | 2.6 | the fast, free lane: $0 marginal on ChatGPT Plus and the quickest here, for latency-bound or high-volume batches. Costs 11 agentic points |
-| `opencode-go/deepseek-v4-flash` | 48.4 | 51.8 | ~0.04 est | 7.1 | a second cheap bucket ($30/mo) once the flash allowance is spent |
-| `openai/gpt-5.6-sol` | 57.8 | 60.9 | 0.953 metered, $0 on Plus | 3.8 | the smart free lane: highest intelligence here at no marginal cost on ChatGPT Plus, and fast with it |
-| `anthropic/claude-opus-5` | 59.2 | 63.1 | 2.337 | 7.3 | the ceiling on both axes, for calls worth paying for |
-
-Escalate without asking when a cheaper worker will not meet the bar.
+| `opencode-go/glm-5.3-flash` | 58.2 | 42 | $0.15/$0.50 per 1M | — | the old executor row, retained as the Go credit-saving lane; its bucket is now $60/mo ≈ 500 tasks |
+| `opencode-go/deepseek-v4-flash` | 48.4 | 35 | $0.15/$0.60 per 1M off-peak | — | a second cheap bucket ($30/mo) once the flash allowance is spent |
+| `opencode-go/deepseek-v4.1-flash` | TBD — no AA composite Agentic score published; vendor-reported DeepSWE 74.2 and AutomationBench 54.8 are secondary | **40 (AA Intelligence Index v4.3, canonical);** vendor-reported Terminal-Bench 2.1 90.6 is secondary; 190.1 tok/s | AA peak $0.30/$1.20 per 1M; Go-only off-peak $0.15/$0.60 per 1M; $15/mo bucket; no Zen entry | — | medium overflow after `glm-5.3-flash` is spent, preserving the glm bucket |
+| `openai/gpt-5.6-sol` | 57.8 | 47 | Zen $2/$10 through Sep 18, 2026, then $4/$15; not on Go | — | the hard-tier Zen lane while the promotion lasts |
+| `anthropic/claude-opus-5` | 59.2 | 51 | Zen $5/$25 metered | — | the ceiling on both axes, for critical calls worth paying for |
+| `opencode-go/glm-5.2` | 43.1 | 39 est. | $1.40/$4.40 per 1M | — | architect fallback with a $60 allowance |
 
 ## Budget
 
@@ -115,20 +128,27 @@ output tokens per request; real worker tasks emit 10k-55k, so ignore them.
 
 `glm-5.3` and `glm-5.3-flash` are Go-only — Zen tops out at GLM 5.2 — and each draws its
 own $15, so `executor` and `architect` never compete for the same bucket; together they
-cap at $30 of the $60 ceiling. Stretch them by keeping `architect` advisory and capping
-`steps`. When a bucket runs dry there is no paid fallback for that model, so move
-`executor` to the ChatGPT Plus route, which is free, and `architect` to `glm-5.2`, which
-carries a $60 allowance.
+cap at $30 of the $60 ceiling. The flash bucket is $60/mo, or about 500 tasks at $0.12,
+instead of the old ~125-task estimate. Stretch the buckets by keeping `architect` advisory
+and capping `steps`. When a bucket runs dry there is no paid fallback for that model, so
+move `executor` to the ChatGPT Plus route, which is free, and `architect` to `glm-5.2`,
+which carries a $60 allowance. `deepseek-v4.1-flash` has AA Intelligence Index 40 (v4.3),
+190.1 tok/s, and AA peak pricing of $0.30/$1.20 per 1M; it is Go-only with $0.15/$0.60
+off-peak pricing, no Zen entry, and its own $15 monthly bucket. Its AA composite Agentic
+score remains TBD; vendor benchmarks are secondary. Sol's Zen promotion is $2/$10 through Sep 18, 2026, then
+reprices to $4/$15, roughly 2x.
 
-Figures retrieved 2026-08-28 from the
+Figures retrieved 2026-09-10 using the v4.3 scale break from the
 [Agentic Index](https://artificialanalysis.ai/models/capabilities/agentic), the
 [Intelligence Index](https://artificialanalysis.ai/#intelligence-tabs),
 [Go](https://opencode.ai/docs/go/), and [Zen](https://opencode.ai/docs/zen/).
-`glm-5.3-flash` shipped 2026-08-26 and has no Agentic Index entry yet, so its 57.5 is an
-Intelligence Index score — do not read it across the agentic column. Prices come from the
-Go docs, which bill it at $0.15/$0.50 per 1M; models.dev advertises half that, and the
-billing source wins. Per-task costs assume measured output tokens plus ~20k fresh input
-and ~50k cached-read input; they are order-of-magnitude, not billing.
+`deepseek-v4.1-flash` AA facts were updated 2026-09-10 from its
+[model page](https://artificialanalysis.ai/models/deepseek-v4-1-flash): Intelligence Index 40 (v4.3),
+190.1 tok/s, and $0.30/$1.20 per 1M peak pricing; its composite Agentic score remains TBD.
+`glm-5.3-flash` has a confirmed independent Agentic Index entry of 58.2 from Aug 27; its
+v4.3 Intelligence Index score is 42. Prices come from the Go and Zen docs; per-task costs
+are omitted where the fresh figures provide token rates rather than a comparable task
+estimate.
 
 ## Reasoning Effort
 
