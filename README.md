@@ -31,6 +31,7 @@ source package during local development.
 
 - `agent-orchestration`: assesses task difficulty, selects models, writes self-contained worker prompts, and coordinates parallel agents.
 - `worktree-spawn`: creates worktrees, copies local configuration, and selects models for subagents.
+- `t3code-orchestration`: orchestrates OpenCode subagents inside t3code so every spawn stays visible in the thread, with an ordered fallback when a lane hits its usage limit.
 
 ## Agent definitions
 

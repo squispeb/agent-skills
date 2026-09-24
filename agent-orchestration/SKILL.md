@@ -14,6 +14,9 @@ Classify the task, spawn the cheapest worker that clears it, verify the worker a
 ran as configured, then verify its output against the acceptance criteria. Do not
 delegate a task smaller than the prompt needed to describe it.
 
+Inside t3code, load `t3code-orchestration` instead: it replaces the transport and routing
+rules below for that harness.
+
 Three workers exist. Resist adding more: every extra archetype is another definition
 that can drift out of sync with this file.
 
