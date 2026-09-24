@@ -45,7 +45,7 @@ mkdir -p ~/.config/opencode/agents
 cp ~/.agents/skills/agent-orchestration/agents/*.md ~/.config/opencode/agents/
 ```
 
-Three definitions ship:
+Four definitions ship:
 
 - `executor.md` — bounded implementation against a locked spec. Returns
   `BLOCKED` instead of resolving an ambiguity itself.
@@ -54,12 +54,18 @@ Three definitions ship:
 - `worker.md` — the `opencode run` fallback for non-opencode harnesses. It is
   `mode: all` because `--agent` rejects subagent-mode agents and silently falls
   back to the default agent, dropping every denial.
+- `operator.md` — the executor contract plus the Vercel, Railway, Resend, and
+  Trigger.dev MCP tools, for service work. Reads are routine; deploys, sends,
+  deletes, and config changes need the prompt to name them.
 
-All three deny the `task` tool so a spawned worker cannot recurse, deny
+All four deny the `task` tool so a spawned worker cannot recurse, deny
 `opencode *` bash commands, and deny reading `*.env` — opencode ships that read
 as `ask`, and an interactive prompt inside a subagent has nobody to answer it,
 so it hangs instead of failing. Workers source secrets through the shell
-instead. Agent files are read at startup: restart opencode after installing.
+instead. All but `operator` also deny the external MCP servers (`vercel_*`,
+`railway_*`, `resend_*`, `trigger_*`), whose tool schemas otherwise add about
+255k input tokens to every call; extend both lists when you enable a new server.
+Agent files are read at startup: restart opencode after installing.
 
 ## Ownership
 

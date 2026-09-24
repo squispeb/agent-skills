@@ -6,6 +6,13 @@ description: Execution-only worker for orchestrated tasks; cannot spawn subagent
 mode: all
 steps: 30
 permission:
+  # MCP servers inject their full tool schemas into every call: with vercel, railway,
+  # resend and trigger enabled, a worker sent ~268k input tokens to reply "OK". A deny
+  # removes the tools from the model's list. Add a line for every new MCP server.
+  "vercel_*": deny
+  "railway_*": deny
+  "resend_*": deny
+  "trigger_*": deny
   task: deny
   # opencode ships `read` on `*.env` as `ask`. An ask inside a subagent has nobody to
   # answer it, so the call hangs until something aborts it. Deny fails in milliseconds.

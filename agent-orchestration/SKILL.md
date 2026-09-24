@@ -17,7 +17,7 @@ delegate a task smaller than the prompt needed to describe it.
 Inside t3code, load `t3code-orchestration` instead: it replaces the transport and routing
 rules below for that harness.
 
-Three workers exist. Resist adding more: every extra archetype is another definition
+Four workers exist. Resist adding more: every extra archetype is another definition
 that can drift out of sync with this file.
 
 ## Install
@@ -40,7 +40,7 @@ and never invoke `opencode run`.
 
 Call `task` with:
 
-- `subagent_type`: `executor`, `architect`, or `worker`. OpenCode resolves this exact
+- `subagent_type`: `executor`, `operator`, `architect`, or `worker`. OpenCode resolves this exact
   name to the global agent definition.
 - `description`: a short 3-5 word label for the child-session title.
 - `prompt`: the full self-contained worker prompt, beginning with `ROLE: worker (<archetype>).`
@@ -67,7 +67,7 @@ Only the user-facing orchestrator may delegate.
 - `executor` and `architect` are `mode: subagent` (task-spawned only). `worker` is
   `mode: all` because `opencode run --agent` rejects subagent-mode agents — it silently
   falls back to the default agent and drops every tool denial. Never change it.
-- All three deny `task`. `executor` and `worker` also deny `opencode *` and `git push`,
+- All four deny `task`. `executor`, `operator`, and `worker` also deny `opencode *` and `git push`,
   written in every spelling including plugin-rewritten forms (`rtk git push *` as well as
   `git push *`), because patterns match the command string after `tool.execute.before`
   hooks run. Prefer a structural deny over a pattern list where you can: `architect`
@@ -76,6 +76,15 @@ Only the user-facing orchestrator may delegate.
   than proof, and verify it fires.
 - Keep the `ROLE:` prefix: it is the only safeguard on other harnesses or when agent
   configuration is missing.
+- External MCP servers live on one lane. Each enabled server injects its full tool
+  schema into every call, used or not; measured above a 12.5k baseline, vercel adds 139k
+  input tokens, resend 72k, railway 21k, trigger 11k, all four 268k. So `executor`,
+  `architect`, and `worker` deny `vercel_*`, `railway_*`, `resend_*`, and `trigger_*`,
+  and `operator` (luna, `mode: all`, reachable from `task` and `opencode run --agent`)
+  allows them for service work, returning BLOCKED on any deploy, send, delete, or config
+  change the prompt does not name. Extend both lists for every new server, and give the
+  built-in `explore` and `general` the denies plus a model pin in `opencode.json`, since
+  they otherwise inherit both the orchestrator's model and every tool.
 
 ## Choosing a Worker
 

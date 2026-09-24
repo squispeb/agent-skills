@@ -4,6 +4,13 @@ mode: subagent
 model: anthropic/claude-opus-5
 steps: 20
 permission:
+  # MCP servers inject their full tool schemas into every call: with vercel, railway,
+  # resend and trigger enabled, a worker sent ~268k input tokens to reply "OK". A deny
+  # removes the tools from the model's list. Add a line for every new MCP server.
+  "vercel_*": deny
+  "railway_*": deny
+  "resend_*": deny
+  "trigger_*": deny
   edit: deny
   task: deny
   # `*.env` ships as `ask`, which a subagent cannot answer — it would hang instead of
